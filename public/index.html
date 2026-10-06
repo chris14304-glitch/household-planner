@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Household Planner</title>
+<style>
+  :root {
+    --bg: #f6f3ee;
+    --surface: #ffffff;
+    --surface-2: #faf8f4;
+    --ink: #2b2a27;
+    --ink-soft: #6b675f;
+    --line: #e4dfd5;
+    --accent: #3f6f5e;
+    --accent-soft: #e3eee8;
+    --accent-ink: #ffffff;
+    --warn: #b4513b;
+    --today: #f3e6c8;
+    --chip: #e8eef7;
+    --chip-ink: #2f4f7a;
+    --meal-b: #f6e7cf;
+    --meal-l: #e1efe4;
+    --meal-d: #e6e1f2;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.05);
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1b1c1e; --surface: #242628; --surface-2: #2a2c2f; --ink: #ecebe8; --ink-soft: #a5a29b;
+      --line: #393b3f; --accent: #7fb59f; --accent-soft: #2c3b35; --accent-ink: #14201b; --warn: #e08a73;
+      --today: #4a4130; --chip: #2d3a4d; --chip-ink: #bcd2f0; --meal-b: #4a3d2a; --meal-l: #2e4234; --meal-d: #3a3450;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  button { font: inherit; cursor: pointer; }
+  input, textarea, select { font: inherit; color: var(--ink); }
+
+  /* ---------- Header & tabs ---------- */
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    padding: 14px 20px; background: var(--surface); border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .brand { font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
+  .brand span { color: var(--ink-soft); font-weight: 400; font-size: 14px; margin-left: 6px; }
+  .tabs { display: flex; gap: 4px; background: var(--surface-2); padding: 4px; border-radius: 10px; border: 1px solid var(--line); }
+  .tab {
+    border: 0; background: transparent; color: var(--ink-soft); padding: 7px 18px; border-radius: 7px; font-weight: 600;
+  }
+  .tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 18px 16px 40px; }
+  .panel { display: none; }
+  .panel.active { display: flex; flex-direction: column; gap: 18px; }
+
+  .top { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .top.single { grid-template-columns: 1fr; }
+  @media (max-width: 760px) { .top { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 16px; min-width: 0;
+  }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+  .card-head h2 { margin: 0; font-size: 17px; }
+  .card-head .meta { color: var(--ink-soft); font-size: 13px; }
+
+  /* ---------- Lists ---------- */
+  .add-row { display: flex; gap: 8px; }
+  .add-row input {
+    flex: 1; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2);
+  }
+  .add-row input:focus, .field input:focus, .field textarea:focus, .field select:focus {
+    outline: 2px solid var(--accent); outline-offset: -1px; background: var(--surface);
+  }
+  .btn {
+    border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+    padding: 8px 14px; border-radius: 9px; font-weight: 600; white-space: nowrap;
+  }
+  .btn.ghost { background: transparent; color: var(--accent); }
+  .btn.small { padding: 4px 10px; font-size: 13px; }
+  .btn.danger { border-color: var(--warn); background: transparent; color: var(--warn); }
+  .hint { color: var(--ink-soft); font-size: 12px; margin: 6px 2px 0; }
+
+  ul.items {
+    list-style: disc; margin: 10px 0 0; padding: 0 4px 0 22px;
+    height: 260px; overflow-y: auto; border-top: 1px solid var(--line);
+  }
+  ul.items li { padding: 7px 0; border-bottom: 1px solid var(--line); }
+  ul.items li::marker { color: var(--accent); }
+  .item { display: flex; align-items: flex-start; gap: 8px; }
+  .item input[type="checkbox"] { margin-top: 3px; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
+  .item .text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .item .del { border: 0; background: transparent; color: var(--ink-soft); font-size: 16px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
+  .item .del:hover { color: var(--warn); background: var(--surface-2); }
+  li.done .text { text-decoration: line-through; color: var(--ink-soft); }
+  .empty { list-style: none; color: var(--ink-soft); font-style: italic; border: 0 !important; margin-left: -22px; padding-top: 14px !important; }
+  .list-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 13px; color: var(--ink-soft); }
+  .linklike { border: 0; background: none; color: var(--accent); padding: 0; font-size: 13px; }
+
+  /* ---------- Calendar ---------- */
+  .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .cal-head h2 { margin: 0; font-size: 19px; min-width: 170px; }
+  .cal-nav { display: flex; gap: 6px; }
+  .icon-btn {
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+    width: 34px; height: 34px; border-radius: 9px; font-size: 18px; line-height: 1;
+  }
+  .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+  .dow { text-align: center; font-size: 12px; font-weight: 600; color: var(--ink-soft); padding: 4px 0; text-transform: uppercase; letter-spacing: .04em; }
+  .day {
+    min-height: 92px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 5px 6px; text-align: left; display: flex; flex-direction: column; gap: 3px; color: var(--ink); overflow: hidden;
+  }
+  .day:hover { border-color: var(--accent); }
+  .day.other { opacity: .45; }
+  .day.today { background: var(--today); }
+  .day .num { font-weight: 600; font-size: 13px; }
+  .day.today .num { color: var(--accent); }
+  .chip {
+    font-size: 11.5px; background: var(--chip); color: var(--chip-ink); border-radius: 5px; padding: 1px 5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chip.B { background: var(--meal-b); color: var(--ink); }
+  .chip.L { background: var(--meal-l); color: var(--ink); }
+  .chip.D { background: var(--meal-d); color: var(--ink); }
+  .more { font-size: 11px; color: var(--ink-soft); }
+  @media (max-width: 600px) {
+    .day { min-height: 58px; padding: 4px; }
+    .chip { font-size: 0; padding: 0; height: 6px; border-radius: 3px; background: var(--accent); }
+    .chip.B, .chip.L, .chip.D { background: var(--accent); }
+    .more { font-size: 10px; }
+  }
+
+  /* ---------- Modal ---------- */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(20,20,20,.45); display: none;
+    align-items: center; justify-content: center; padding: 16px; z-index: 50;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border-radius: 14px; width: 100%; max-width: 560px; max-height: 90vh;
+    display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.3); overflow: hidden;
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .modal-head h3 { margin: 0; font-size: 17px; }
+  .close-x { border: 0; background: var(--surface-2); color: var(--ink); width: 34px; height: 34px; border-radius: 50%; font-size: 20px; line-height: 1; }
+  .close-x:hover { background: var(--line); }
+  .modal-body { overflow-y: auto; padding: 0 16px 16px; }
+  .modal-actions { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; }
+
+  .hour { display: grid; grid-template-columns: 64px 1fr; border-bottom: 1px solid var(--line); min-height: 44px; }
+  .hour .label { font-size: 12px; color: var(--ink-soft); padding-top: 6px; }
+  .hour .slot { padding: 4px 0; display: flex; flex-direction: column; gap: 4px; }
+
+  .event {
+    background: var(--chip); color: var(--chip-ink); border-radius: 8px; padding: 6px 8px; display: flex; gap: 8px; align-items: flex-start;
+  }
+  .event .ev-main { flex: 1; min-width: 0; }
+  .event .ev-title { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+  .event .ev-time { font-size: 12px; opacity: .8; }
+  .event .ev-desc { font-size: 13px; margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+  .event .del { border: 0; background: transparent; color: inherit; opacity: .6; font-size: 16px; padding: 0 2px; }
+  .event .del:hover { opacity: 1; color: var(--warn); }
+
+  .meal { border-bottom: 1px solid var(--line); padding: 12px 0; }
+  .meal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .meal-head h4 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .meal .event { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); }
+  .meal-empty { color: var(--ink-soft); font-size: 13px; font-style: italic; }
+
+  .form { display: none; padding: 14px 0 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+  .form.open { display: block; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .field label { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+  .field input, .field textarea, .field select {
+    padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); width: 100%;
+  }
+  .field textarea { resize: vertical; min-height: 60px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .check { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-soft); margin-bottom: 10px; }
+  .check input { accent-color: var(--accent); }
+  .err { color: var(--warn); font-size: 13px; min-height: 1em; margin: 0 0 6px; }
+
+  footer { max-width: 1200px; margin: 0 auto; padding: 0 16px 30px; display: flex; gap: 14px; flex-wrap: wrap; color: var(--ink-soft); font-size: 13px; }
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0;
+    background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 9px; font-size: 14px;
+    transition: .2s; pointer-events: none; z-index: 60;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">Our Home</div>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" data-tab="household" aria-selected="true">Household</button>
+    <button class="tab" role="tab" data-tab="meals" aria-selected="false">Meals</button>
+  </div>
+</header>
+
+<main>
+  <!-- ===== HOUSEHOLD ===== -->
+  <section class="panel active" id="panel-household">
+    <div class="top">
+      <div class="card" data-list="todo" data-title="To-Do" data-placeholder="Add a to-do… (e.g. schedule pest control)"></div>
+      <div class="card" data-list="house" data-title="House" data-placeholder="Add a house job… (e.g. fix kitchen leak)"></div>
+    </div>
+    <div class="card" data-calendar="household" data-mode="hours"></div>
+  </section>
+
+  <!-- ===== MEALS ===== -->
+  <section class="panel" id="panel-meals">
+    <div class="top single">
+      <div class="card" data-list="grocery" data-title="Grocery" data-placeholder="Add groceries… (e.g. dishwasher pods, rinse aid)"></div>
+    </div>
+    <div class="card" data-calendar="meals" data-mode="meals"></div>
+  </section>
+</main>
+
+<footer>
+  <span>Saved automatically in this browser.</span>
+  <button class="linklike" id="exportBtn">Download backup</button>
+  <button class="linklike" id="importBtn">Restore backup</button>
+  <input type="file" id="importFile" accept="application/json" hidden>
+</footer>
+
+<!-- ===== Day popup ===== -->
+<div class="overlay" id="overlay" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <h3 id="modalTitle">Day</h3>
+      <button class="close-x" id="closeModal" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ================= Storage ================= */
+  const KEY = "household-planner-v1";
+  const blank = () => ({ lists: { todo: [], house: [], grocery: [] }, events: {}, meals: {}, tab: "household" });
+  let state = load();
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) return Object.assign(blank(), JSON.parse(raw));
+    } catch (e) { /* storage unavailable */ }
+    return blank();
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  }
+
+  /* ================= Helpers ================= */
+  const $ = (s, r = document) => r.querySelector(s);
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const pad = (n) => String(n).padStart(2, "0");
+  const dateKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+  function fmtTime(t) {
+    if (!t) return "";
+    const [h, m] = t.split(":").map(Number);
+    const ap = h >= 12 ? "PM" : "AM";
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${pad(m)} ${ap}`;
+  }
+  function hourLabel(h) { return `${h % 12 === 0 ? 12 : h % 12} ${h >= 12 ? "PM" : "AM"}`; }
+
+  function toast(msg) {
+    const t = $("#toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => t.classList.remove("show"), 1800);
+  }
+
+  /* ================= Tabs ================= */
+  function setTab(name) {
+    state.tab = name; save();
+    document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === name));
+    document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + name));
+  }
+  document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
+
+
+  /* ================= Lists ================= */
+  function addItems(name, text) {
+    // Paste a whole list at once: every non-empty line becomes an item.
+    const lines = text.split(/\r?\n/).map(s => s.replace(/^\s*[-*•\d.)]+\s*/, "").trim()).filter(Boolean);
+    lines.forEach(t => state.lists[name].push({ id: uid(), text: t, done: false }));
+    save();
+    return lines.length;
+  }
+
+  function buildList(card) {
+    const name = card.dataset.list;
+    card.innerHTML = `
+      <div class="card-head"><h2>${esc(card.dataset.title)}</h2><span class="meta"></span></div>
+      <form class="add-row">
+        <input type="text" placeholder="${esc(card.dataset.placeholder)}" aria-label="New ${esc(card.dataset.title)} item">
+        <button class="btn" type="submit">Add</button>
+      </form>
+      <p class="hint">Press Enter to add. Paste a list and each line becomes its own item.</p>
+      <ul class="items"></ul>
+      <div class="list-foot"><span class="by-note"></span><button class="linklike clear-done" type="button">Clear completed</button></div>`;
+
+    const form = $("form", card), input = $("input", card);
+    form.addEventListener("submit", e => {
+      e.preventDefault();
+      if (!input.value.trim()) return;
+      addItems(name, input.value);
+      input.value = "";
+      renderList(card);
+      input.focus();
+    });
+    input.addEventListener("paste", e => {
+      const txt = (e.clipboardData || window.clipboardData).getData("text");
+      if (txt && /\n/.test(txt.trim())) {
+        e.preventDefault();
+        const n = addItems(name, txt);
+        renderList(card);
+        toast(`Added ${n} items to ${card.dataset.title}`);
+      }
+    });
+    $(".clear-done", card).addEventListener("click", () => {
+      state.lists[name] = state.lists[name].filter(i => !i.done);
+      save(); renderList(card);
+    });
+    $("ul", card).addEventListener("click", e => {
+      const li = e.target.closest("li[data-id]");
+      if (!li) return;
+      const item = state.lists[name].find(i => i.id === li.dataset.id);
+      if (!item) return;
+      if (e.target.matches(".del")) {
+        state.lists[name] = state.lists[name].filter(i => i !== item);
+      } else if (e.target.matches("input[type=checkbox]")) {
+        item.done = e.target.checked;
+      } else return;
+      save(); renderList(card);
+    });
+    renderList(card);
+  }
+
+  function renderList(card) {
+    const name = card.dataset.list;
+    const items = state.lists[name];
+    const ul = $("ul", card);
+    const open = items.filter(i => !i.done);
+    const done = items.filter(i => i.done);
+    $(".meta", card).textContent = `${open.length} open${done.length ? ` · ${done.length} done` : ""}`;
+    $(".clear-done", card).style.visibility = done.length ? "visible" : "hidden";
+    if (!items.length) {
+      ul.innerHTML = `<li class="empty">Nothing here yet.</li>`;
+      return;
+    }
+    ul.innerHTML = [...open, ...done].map(i => `
+      <li data-id="${i.id}" class="${i.done ? "done" : ""}">
+        <div class="item">
+          <input type="checkbox" ${i.done ? "checked" : ""} aria-label="Mark done">
+          <span class="text">${esc(i.text)}</span>
+          <button class="del" type="button" aria-label="Delete">&times;</button>
+        </div>
+      </li>`).join("");
+  }
+
+  document.querySelectorAll("[data-list]").forEach(buildList);
+
+  /* ================= Calendars ================= */
+  const MEAL_SLOTS = [
+    { key: "B", name: "Breakfast", color: "var(--meal-b)" },
+    { key: "L", name: "Lunch", color: "var(--meal-l)" },
+    { key: "D", name: "Dinner", color: "var(--meal-d)" }
+  ];
+  const calendars = {};
+
+  function buildCalendar(card) {
+    const id = card.dataset.calendar;
+    const mode = card.dataset.mode;
+    const now = new Date();
+    const cal = { id, mode, card, year: now.getFullYear(), month: now.getMonth() };
+    calendars[id] = cal;
+
+    card.innerHTML = `
+      <div class="cal-head">
+        <h2></h2>
+        <div class="cal-nav">
+          <button class="icon-btn prev" aria-label="Previous month">&#8249;</button>
+          <button class="btn ghost small today-btn">Today</button>
+          <button class="icon-btn next" aria-label="Next month">&#8250;</button>
+        </div>
+      </div>
+      <div class="grid">${DOW.map(d => `<div class="dow">${d}</div>`).join("")}</div>
+      <div class="grid days"></div>`;
+
+    $(".prev", card).onclick = () => { cal.month--; if (cal.month < 0) { cal.month = 11; cal.year--; } renderCalendar(cal); };
+    $(".next", card).onclick = () => { cal.month++; if (cal.month > 11) { cal.month = 0; cal.year++; } renderCalendar(cal); };
+    $(".today-btn", card).onclick = () => { const n = new Date(); cal.year = n.getFullYear(); cal.month = n.getMonth(); renderCalendar(cal); };
+    $(".days", card).addEventListener("click", e => {
+      const d = e.target.closest(".day");
+      if (d) openDay(cal, d.dataset.date);
+    });
+    renderCalendar(cal);
+  }
+
+  function itemsFor(cal, key) {
+    if (cal.mode === "hours") {
+      return (state.events[key] || []).slice().sort((a, b) => a.start.localeCompare(b.start))
+        .map(e => ({ cls: "", label: `${fmtTime(e.start)} ${e.title}` }));
+    }
+    const day = state.meals[key] || {};
+    const out = [];
+    MEAL_SLOTS.forEach(s => (day[s.key] || []).forEach(m => out.push({ cls: s.key, label: `${s.key} · ${m.title}` })));
+    return out;
+  }
+
+  function renderCalendar(cal) {
+    $("h2", cal.card).textContent = `${MONTHS[cal.month]} ${cal.year}`;
+    const first = new Date(cal.year, cal.month, 1);
+    const start = new Date(cal.year, cal.month, 1 - first.getDay());
+    const todayKey = dateKey(new Date());
+    let html = "";
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      if (i === 35 && d.getMonth() !== cal.month) break; // drop an empty 6th row
+      const key = dateKey(d);
+      const items = itemsFor(cal, key);
+      const shown = items.slice(0, 3);
+      html += `
+        <button class="day ${d.getMonth() !== cal.month ? "other" : ""} ${key === todayKey ? "today" : ""}" data-date="${key}"
+          aria-label="${MONTHS[d.getMonth()]} ${d.getDate()}, ${items.length} item${items.length === 1 ? "" : "s"}">
+          <span class="num">${d.getDate()}</span>
+          ${shown.map(it => `<span class="chip ${it.cls}">${esc(it.label)}</span>`).join("")}
+          ${items.length > 3 ? `<span class="more">+${items.length - 3} more</span>` : ""}
+        </button>`;
+    }
+    $(".days", cal.card).innerHTML = html;
+  }
+
+  /* ================= Day popup ================= */
+  const overlay = $("#overlay"), body = $("#modalBody"), actions = $("#modalActions");
+  let current = null; // { cal, key }
+
+  function openDay(cal, key) {
+    current = { cal, key };
+    const [y, m, d] = key.split("-").map(Number);
+    const date = new Date(y, m - 1, d);
+    $("#modalTitle").textContent = date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+    if (cal.mode === "hours") renderHours(); else renderMeals();
+    overlay.classList.add("open");
+    overlay.setAttribute("aria-hidden", "false");
+  }
+  function closeDay() {
+    overlay.classList.remove("open");
+    overlay.setAttribute("aria-hidden", "true");
+    if (current) renderCalendar(current.cal);
+    current = null;
+  }
+  $("#closeModal").onclick = closeDay;
+  overlay.addEventListener("click", e => { if (e.target === overlay) closeDay(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && overlay.classList.contains("open")) closeDay(); });
+
+  /* ---- Household: hour-by-hour ---- */
+  function renderHours(openForm, presetHour) {
+    const { key } = current;
+    const events = (state.events[key] || []).slice().sort((a, b) => a.start.localeCompare(b.start));
+    const preset = presetHour != null ? `${pad(presetHour)}:00` : "09:00";
+    let html = `
+      <form class="form ${openForm ? "open" : ""}" id="evForm">
+        <div class="field"><label for="evTitle">Title</label><input id="evTitle" required placeholder="e.g. Vet – heartworm meds"></div>
+        <div class="row2">
+          <div class="field"><label for="evStart">Start time</label><input id="evStart" type="time" value="${preset}" required></div>
+          <div class="field"><label for="evEnd">End time (optional)</label><input id="evEnd" type="time"></div>
+        </div>
+        <div class="field"><label for="evDesc">Description</label><textarea id="evDesc" placeholder="Details, address, who's going…"></textarea></div>
+        <p class="err" id="evErr"></p>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" class="btn ghost" id="evCancel">Cancel</button>
+          <button type="submit" class="btn">Save event</button>
+        </div>
+      </form>`;
+    for (let h = 0; h < 24; h++) {
+      const inHour = events.filter(e => Number(e.start.slice(0, 2)) === h);
+      html += `<div class="hour" id="h${h}"><div class="label">${hourLabel(h)}</div><div class="slot" data-hour="${h}">
+        ${inHour.map(e => `
+          <div class="event" data-id="${e.id}">
+            <div class="ev-main">
+              <div class="ev-title">${esc(e.title)}</div>
+              <div class="ev-time">${fmtTime(e.start)}${e.end ? " – " + fmtTime(e.end) : ""}</div>
+              ${e.desc ? `<div class="ev-desc">${esc(e.desc)}</div>` : ""}
+            </div>
+            <button class="del" aria-label="Delete event">&times;</button>
+          </div>`).join("")}
+      </div></div>`;
+    }
+    body.innerHTML = html;
+    actions.innerHTML = `<button class="btn" id="addEv">+ Add event</button>`;
+
+    $("#addEv").onclick = () => { renderHours(true); };
+    $("#evCancel").onclick = () => renderHours(false);
+    $("#evForm").onsubmit = e => {
+      e.preventDefault();
+      const title = $("#evTitle").value.trim(), start = $("#evStart").value, end = $("#evEnd").value;
+      if (!title || !start) { $("#evErr").textContent = "Add a title and a start time."; return; }
+      if (end && end <= start) { $("#evErr").textContent = "End time needs to be after the start time."; return; }
+      (state.events[key] = state.events[key] || []).push({ id: uid(), title, start, end, desc: $("#evDesc").value.trim() });
+      save();
+      renderHours(false);
+      const target = $("#h" + Number(start.slice(0, 2)));
+      if (target) target.scrollIntoView({ block: "center" });
+      toast("Event added");
+    };
+    body.querySelectorAll(".slot").forEach(slot => slot.addEventListener("dblclick", ev => {
+      if (ev.target === slot) renderHours(true, Number(slot.dataset.hour));
+    }));
+    body.querySelectorAll(".event .del").forEach(btn => btn.onclick = () => {
+      const id = btn.closest(".event").dataset.id;
+      state.events[key] = (state.events[key] || []).filter(x => x.id !== id);
+      if (!state.events[key].length) delete state.events[key];
+      save(); renderHours(false);
+    });
+
+    if (openForm) { body.scrollTop = 0; $("#evTitle").focus(); }
+    else {
+      const firstHour = events.length ? Number(events[0].start.slice(0, 2)) : 7;
+      const row = $("#h" + firstHour);
+      if (row) body.scrollTop = row.offsetTop - body.offsetTop - 8;
+    }
+  }
+
+  /* ---- Meals: breakfast / lunch / dinner ---- */
+  function renderMeals(openSlot) {
+    const { key } = current;
+    const day = state.meals[key] || {};
+    body.innerHTML = MEAL_SLOTS.map(s => {
+      const meals = day[s.key] || [];
+      return `
+        <div class="meal" data-slot="${s.key}">
+          <div class="meal-head">
+            <h4><span class="swatch" style="background:${s.color}"></span>${s.name}</h4>
+            <button class="btn ghost small add-meal">+ Add</button>
+          </div>
+          ${meals.length ? "" : `<div class="meal-empty">Nothing planned.</div>`}
+          <div style="display:flex;flex-direction:column;gap:6px">
+            ${meals.map(m => `
+              <div class="event" data-id="${m.id}">
+                <div class="ev-main">
+                  <div class="ev-title">${esc(m.title)}</div>
+                  ${m.desc ? `<div class="ev-desc">${esc(m.desc)}</div>` : ""}
+                </div>
+                <button class="del" aria-label="Delete meal">&times;</button>
+              </div>`).join("")}
+          </div>
+          <form class="form ${openSlot === s.key ? "open" : ""}">
+            <div class="field"><label>Meal</label><input name="title" required placeholder="e.g. Chicken tacos"></div>
+            <div class="field"><label>Notes / recipe</label><textarea name="desc" placeholder="Link, prep notes, who's cooking…"></textarea></div>
+            <div class="field"><label>Ingredients (one per line)</label><textarea name="ing" placeholder="tortillas&#10;chicken thighs&#10;limes"></textarea></div>
+            <label class="check"><input type="checkbox" name="toGrocery" checked> Add ingredients to the Grocery list</label>
+            <p class="err"></p>
+            <div style="display:flex;gap:8px;justify-content:flex-end">
+              <button type="button" class="btn ghost cancel">Cancel</button>
+              <button type="submit" class="btn">Save ${s.name.toLowerCase()}</button>
+            </div>
+          </form>
+        </div>`;
+    }).join("");
+    actions.innerHTML = `<button class="btn ghost" id="doneMeals">Done</button>`;
+    $("#doneMeals").onclick = closeDay;
+
+    body.querySelectorAll(".meal").forEach(section => {
+      const slot = section.dataset.slot;
+      const form = $("form", section);
+      $(".add-meal", section).onclick = () => { renderMeals(slot); };
+      $(".cancel", section).onclick = () => renderMeals();
+      form.onsubmit = e => {
+        e.preventDefault();
+        const title = form.title.value.trim();
+        if (!title) { $(".err", form).textContent = "Give the meal a name."; return; }
+        const ing = form.ing.value.trim();
+        const d = state.meals[key] = state.meals[key] || {};
+        (d[slot] = d[slot] || []).push({ id: uid(), title, desc: form.desc.value.trim(), ingredients: ing });
+        let added = 0;
+        if (ing && form.toGrocery.checked) {
+          added = addItems("grocery", ing);
+          const g = document.querySelector('[data-list="grocery"]');
+          if (g) renderList(g);
+        }
+        save();
+        renderMeals();
+        toast(added ? `Saved · ${added} ingredient${added === 1 ? "" : "s"} added to Grocery` : "Meal saved");
+      };
+      section.querySelectorAll(".event .del").forEach(btn => btn.onclick = () => {
+        const id = btn.closest(".event").dataset.id;
+        state.meals[key][slot] = state.meals[key][slot].filter(m => m.id !== id);
+        if (!state.meals[key][slot].length) delete state.meals[key][slot];
+        if (!Object.keys(state.meals[key]).length) delete state.meals[key];
+        save(); renderMeals();
+      });
+    });
+    if (openSlot) { const f = body.querySelector(`.meal[data-slot="${openSlot}"] input[name=title]`); if (f) { f.focus(); f.scrollIntoView({ block: "nearest" }); } }
+  }
+
+  document.querySelectorAll("[data-calendar]").forEach(buildCalendar);
+
+  /* ================= Backup / restore ================= */
+  $("#exportBtn").onclick = () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `household-planner-${dateKey(new Date())}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $("#importBtn").onclick = () => $("#importFile").click();
+  $("#importFile").onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const data = JSON.parse(r.result);
+        if (!data.lists) throw new Error("bad file");
+        state = Object.assign(blank(), data);
+        save();
+        location.reload();
+      } catch (err) { toast("That file isn't a planner backup"); }
+    };
+    r.readAsText(file);
+    e.target.value = "";
+  };
+
+  setTab(state.tab === "meals" ? "meals" : "household");
+})();
+</script>
+</body>
+</html>
