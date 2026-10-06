@@ -50,7 +50,6 @@
     position: sticky; top: 0; z-index: 10;
   }
   .brand { font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
-  .brand span { color: var(--ink-soft); font-weight: 400; font-size: 14px; margin-left: 6px; }
   .tabs { display: flex; gap: 4px; background: var(--surface-2); padding: 4px; border-radius: 10px; border: 1px solid var(--line); }
   .tab {
     border: 0; background: transparent; color: var(--ink-soft); padding: 7px 18px; border-radius: 7px; font-weight: 600;
@@ -191,28 +190,62 @@
   .check input { accent-color: var(--accent); }
   .err { color: var(--warn); font-size: 13px; min-height: 1em; margin: 0 0 6px; }
 
-  footer { max-width: 1200px; margin: 0 auto; padding: 0 16px 30px; display: flex; gap: 14px; flex-wrap: wrap; color: var(--ink-soft); font-size: 13px; }
   .toast {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0;
     background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 9px; font-size: 14px;
     transition: .2s; pointer-events: none; z-index: 60;
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ---------- Header extras ---------- */
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .sync { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
+  .sync .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-soft); }
+  .sync.live .dot { background: #4caf7a; }
+  .sync.off .dot { background: var(--warn); }
+
+  /* ---------- Sign-in ---------- */
+  .login {
+    position: fixed; inset: 0; background: var(--bg); z-index: 80;
+    display: none; align-items: center; justify-content: center; padding: 16px;
+  }
+  .login.open { display: flex; }
+  .login-card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
+    width: 100%; max-width: 380px; padding: 26px 24px 22px;
+  }
+  .login-card h1 { margin: 0 0 4px; font-size: 22px; }
+  .login-card p.sub { margin: 0 0 18px; color: var(--ink-soft); font-size: 14px; }
+  .login-card .btn { width: 100%; padding: 10px; margin-top: 4px; }
+  .login-card .btn[disabled] { opacity: .6; cursor: wait; }
+  .login-links { display: flex; justify-content: center; margin-top: 14px; }
+  .msg { font-size: 13px; min-height: 1em; margin: 0 0 8px; color: var(--accent); }
+
+  .loading { text-align: center; color: var(--ink-soft); padding: 40px 0; }
+  main.hidden, header.hidden { display: none; }
 </style>
+<!-- Supabase client library -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
-<header>
+<header class="hidden" id="appHeader">
   <div class="brand">Our Home</div>
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" data-tab="household" aria-selected="true">Household</button>
     <button class="tab" role="tab" data-tab="meals" aria-selected="false">Meals</button>
   </div>
+  <div class="header-right">
+    <span class="sync" id="sync" title="Live sync status"><span class="dot"></span><span class="label">Connecting…</span></span>
+    <button class="btn ghost small" id="signOutBtn">Sign out</button>
+  </div>
 </header>
 
-<main>
+<main class="hidden" id="appMain">
+  <div class="loading" id="loading">Loading…</div>
+
   <!-- ===== HOUSEHOLD ===== -->
-  <section class="panel active" id="panel-household">
+  <section class="panel" id="panel-household">
     <div class="top">
       <div class="card" data-list="todo" data-title="To-Do" data-placeholder="Add a to-do… (e.g. schedule pest control)"></div>
       <div class="card" data-list="house" data-title="House" data-placeholder="Add a house job… (e.g. fix kitchen leak)"></div>
@@ -229,12 +262,19 @@
   </section>
 </main>
 
-<footer>
-  <span>Saved automatically in this browser.</span>
-  <button class="linklike" id="exportBtn">Download backup</button>
-  <button class="linklike" id="importBtn">Restore backup</button>
-  <input type="file" id="importFile" accept="application/json" hidden>
-</footer>
+<!-- ===== Sign-in screen ===== -->
+<div class="login" id="login">
+  <form class="login-card" id="loginForm">
+    <h1>Our Home</h1>
+    <p class="sub" id="loginSub">Sign in to see your lists and calendars.</p>
+    <div class="field" id="emailField"><label for="loginEmail">Email</label><input id="loginEmail" type="email" autocomplete="email" required></div>
+    <div class="field"><label for="loginPassword" id="pwLabel">Password</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
+    <p class="err" id="loginErr"></p>
+    <p class="msg" id="loginMsg"></p>
+    <button class="btn" type="submit" id="loginBtn">Sign in</button>
+    <div class="login-links"><button type="button" class="linklike" id="forgotBtn">Forgot password?</button></div>
+  </form>
+</div>
 
 <!-- ===== Day popup ===== -->
 <div class="overlay" id="overlay" aria-hidden="true">
@@ -254,26 +294,28 @@
 (function () {
   "use strict";
 
-  /* ================= Storage ================= */
-  const KEY = "household-planner-v1";
-  const blank = () => ({ lists: { todo: [], house: [], grocery: [] }, events: {}, meals: {}, tab: "household" });
-  let state = load();
+  /* ================= Supabase connection ================= */
+  const SUPABASE_URL = "https://alzribqzvrcduelmlgcd.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_Gt96Gaun8Caz_UHHUjfBWA_WIza7gpS"; // publishable key – safe in page code; RLS protects the data
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  function load() {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) return Object.assign(blank(), JSON.parse(raw));
-    } catch (e) { /* storage unavailable */ }
-    return blank();
-  }
-  function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
-  }
+  const LIST_TABLES = { todo: "todo_items", house: "house_items", grocery: "grocery_items" };
+  const TABLE_TO_BUCKET = {
+    todo_items: "todo", house_items: "house", grocery_items: "grocery",
+    household_events: "events", meal_plans: "meals"
+  };
+  const MEAL_SLOTS = [
+    { key: "B", type: "breakfast", name: "Breakfast", color: "var(--meal-b)" },
+    { key: "L", type: "lunch",     name: "Lunch",     color: "var(--meal-l)" },
+    { key: "D", type: "dinner",    name: "Dinner",    color: "var(--meal-d)" }
+  ];
+
+  // In-memory copy of the five tables
+  const data = { todo: [], house: [], grocery: [], events: [], meals: [] };
 
   /* ================= Helpers ================= */
   const $ = (s, r = document) => r.querySelector(s);
-  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const pad = (n) => String(n).padStart(2, "0");
   const dateKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -282,40 +324,125 @@
   function fmtTime(t) {
     if (!t) return "";
     const [h, m] = t.split(":").map(Number);
-    const ap = h >= 12 ? "PM" : "AM";
-    const h12 = h % 12 === 0 ? 12 : h % 12;
-    return `${h12}:${pad(m)} ${ap}`;
+    return `${h % 12 === 0 ? 12 : h % 12}:${pad(m)} ${h >= 12 ? "PM" : "AM"}`;
   }
-  function hourLabel(h) { return `${h % 12 === 0 ? 12 : h % 12} ${h >= 12 ? "PM" : "AM"}`; }
+  const hourLabel = (h) => `${h % 12 === 0 ? 12 : h % 12} ${h >= 12 ? "PM" : "AM"}`;
+  const byCreated = (a, b) => String(a.created_at).localeCompare(String(b.created_at));
+
+  function upsert(arr, row) {
+    const i = arr.findIndex(r => r.id === row.id);
+    if (i >= 0) arr[i] = row; else arr.push(row);
+  }
 
   function toast(msg) {
     const t = $("#toast");
     t.textContent = msg;
     t.classList.add("show");
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => t.classList.remove("show"), 1800);
+    toast._t = setTimeout(() => t.classList.remove("show"), 2200);
   }
+
+  function prefGet(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }
+  function prefSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } }
+
+  // Runs a Supabase write. On failure: tell the user and re-sync from the database.
+  async function run(query, okMsg) {
+    const { data: rows, error } = await query;
+    if (error) {
+      console.error(error);
+      toast("Couldn't save: " + (error.message || "network error"));
+      await loadAll();
+      renderAll();
+      return null;
+    }
+    if (okMsg) toast(okMsg);
+    return rows || [];
+  }
+
+  /* ================= Load + live sync ================= */
+  async function loadAll() {
+    const tables = Object.keys(TABLE_TO_BUCKET);
+    const results = await Promise.all(tables.map(t => sb.from(t).select("*")));
+    results.forEach((res, i) => {
+      if (res.error) { console.error(tables[i], res.error); toast("Couldn't load " + tables[i] + ": " + res.error.message); return; }
+      data[TABLE_TO_BUCKET[tables[i]]] = res.data || [];
+    });
+  }
+
+  let channel = null;
+  function setSync(state, label) {
+    const el = $("#sync");
+    el.className = "sync " + state;
+    $(".label", el).textContent = label;
+  }
+  function subscribe() {
+    if (channel) sb.removeChannel(channel);
+    channel = sb.channel("household-planner");
+    Object.keys(TABLE_TO_BUCKET).forEach(table => {
+      channel.on("postgres_changes", { event: "*", schema: "public", table }, payload => {
+        const bucket = TABLE_TO_BUCKET[table];
+        if (payload.eventType === "DELETE") {
+          data[bucket] = data[bucket].filter(r => r.id !== payload.old.id);
+        } else {
+          upsert(data[bucket], payload.new);
+        }
+        renderBucket(bucket);
+      });
+    });
+    channel.subscribe(status => {
+      if (status === "SUBSCRIBED") setSync("live", "Live");
+      else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setSync("off", "Offline");
+    });
+  }
+
+  // Phones drop the live connection when asleep, so re-sync when the page comes back.
+  document.addEventListener("visibilitychange", async () => {
+    if (!document.hidden && started) { await loadAll(); renderAll(); }
+  });
+
+  /* ================= Rendering hub ================= */
+  function renderBucket(bucket) {
+    if (LIST_TABLES[bucket]) {
+      const card = document.querySelector(`[data-list="${bucket}"]`);
+      if (card) renderList(card);
+    } else if (bucket === "events") {
+      renderCalendar(calendars.household);
+      if (current && current.cal.mode === "hours" && !formOpen()) renderHours(false);
+    } else if (bucket === "meals") {
+      renderCalendar(calendars.meals);
+      if (current && current.cal.mode === "meals" && !formOpen()) renderMeals();
+    }
+  }
+  function renderAll() { Object.keys(data).forEach(renderBucket); }
+  // Don't redraw the popup underneath someone who is typing in it
+  const formOpen = () => !!document.querySelector("#modalBody .form.open");
 
   /* ================= Tabs ================= */
   function setTab(name) {
-    state.tab = name; save();
+    prefSet("planner-tab", name);
     document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === name));
     document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + name));
   }
   document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
 
-
   /* ================= Lists ================= */
-  function addItems(name, text) {
-    // Paste a whole list at once: every non-empty line becomes an item.
-    const lines = text.split(/\r?\n/).map(s => s.replace(/^\s*[-*•\d.)]+\s*/, "").trim()).filter(Boolean);
-    lines.forEach(t => state.lists[name].push({ id: uid(), text: t, done: false }));
-    save();
-    return lines.length;
+  function parseLines(text) {
+    return text.split(/\r?\n/).map(s => s.replace(/^\s*[-*•\d.)]+\s*/, "").trim()).filter(Boolean);
+  }
+
+  async function addItems(name, text, extra) {
+    const lines = parseLines(text);
+    if (!lines.length) return 0;
+    const rows = await run(sb.from(LIST_TABLES[name]).insert(lines.map(t => Object.assign({ text: t }, extra || {}))).select());
+    if (!rows) return 0;
+    rows.forEach(r => upsert(data[name], r));
+    renderBucket(name);
+    return rows.length;
   }
 
   function buildList(card) {
     const name = card.dataset.list;
+    const table = LIST_TABLES[name];
     card.innerHTML = `
       <div class="card-head"><h2>${esc(card.dataset.title)}</h2><span class="meta"></span></div>
       <form class="add-row">
@@ -324,59 +451,61 @@
       </form>
       <p class="hint">Press Enter to add. Paste a list and each line becomes its own item.</p>
       <ul class="items"></ul>
-      <div class="list-foot"><span class="by-note"></span><button class="linklike clear-done" type="button">Clear completed</button></div>`;
+      <div class="list-foot"><span></span><button class="linklike clear-done" type="button">Clear completed</button></div>`;
 
     const form = $("form", card), input = $("input", card);
-    form.addEventListener("submit", e => {
+    form.addEventListener("submit", async e => {
       e.preventDefault();
-      if (!input.value.trim()) return;
-      addItems(name, input.value);
+      const text = input.value;
+      if (!text.trim()) return;
       input.value = "";
-      renderList(card);
       input.focus();
+      await addItems(name, text);
     });
-    input.addEventListener("paste", e => {
+    input.addEventListener("paste", async e => {
       const txt = (e.clipboardData || window.clipboardData).getData("text");
       if (txt && /\n/.test(txt.trim())) {
         e.preventDefault();
-        const n = addItems(name, txt);
-        renderList(card);
-        toast(`Added ${n} items to ${card.dataset.title}`);
+        const n = await addItems(name, txt);
+        if (n) toast(`Added ${n} items to ${card.dataset.title}`);
       }
     });
-    $(".clear-done", card).addEventListener("click", () => {
-      state.lists[name] = state.lists[name].filter(i => !i.done);
-      save(); renderList(card);
+    $(".clear-done", card).addEventListener("click", async () => {
+      const ids = data[name].filter(i => i.done).map(i => i.id);
+      if (!ids.length) return;
+      data[name] = data[name].filter(i => !i.done);
+      renderList(card);
+      await run(sb.from(table).delete().in("id", ids));
     });
-    $("ul", card).addEventListener("click", e => {
+    $("ul", card).addEventListener("click", async e => {
       const li = e.target.closest("li[data-id]");
       if (!li) return;
-      const item = state.lists[name].find(i => i.id === li.dataset.id);
+      const id = li.dataset.id;
+      const item = data[name].find(i => i.id === id);
       if (!item) return;
       if (e.target.matches(".del")) {
-        state.lists[name] = state.lists[name].filter(i => i !== item);
+        data[name] = data[name].filter(i => i.id !== id);
+        renderList(card);
+        await run(sb.from(table).delete().eq("id", id));
       } else if (e.target.matches("input[type=checkbox]")) {
         item.done = e.target.checked;
-      } else return;
-      save(); renderList(card);
+        renderList(card);
+        await run(sb.from(table).update({ done: item.done }).eq("id", id));
+      }
     });
     renderList(card);
   }
 
   function renderList(card) {
-    const name = card.dataset.list;
-    const items = state.lists[name];
+    const items = data[card.dataset.list].slice().sort(byCreated);
     const ul = $("ul", card);
     const open = items.filter(i => !i.done);
     const done = items.filter(i => i.done);
     $(".meta", card).textContent = `${open.length} open${done.length ? ` · ${done.length} done` : ""}`;
     $(".clear-done", card).style.visibility = done.length ? "visible" : "hidden";
-    if (!items.length) {
-      ul.innerHTML = `<li class="empty">Nothing here yet.</li>`;
-      return;
-    }
+    if (!items.length) { ul.innerHTML = `<li class="empty">Nothing here yet.</li>`; return; }
     ul.innerHTML = [...open, ...done].map(i => `
-      <li data-id="${i.id}" class="${i.done ? "done" : ""}">
+      <li data-id="${esc(i.id)}" class="${i.done ? "done" : ""}">
         <div class="item">
           <input type="checkbox" ${i.done ? "checked" : ""} aria-label="Mark done">
           <span class="text">${esc(i.text)}</span>
@@ -385,21 +514,13 @@
       </li>`).join("");
   }
 
-  document.querySelectorAll("[data-list]").forEach(buildList);
-
   /* ================= Calendars ================= */
-  const MEAL_SLOTS = [
-    { key: "B", name: "Breakfast", color: "var(--meal-b)" },
-    { key: "L", name: "Lunch", color: "var(--meal-l)" },
-    { key: "D", name: "Dinner", color: "var(--meal-d)" }
-  ];
   const calendars = {};
 
   function buildCalendar(card) {
     const id = card.dataset.calendar;
-    const mode = card.dataset.mode;
     const now = new Date();
-    const cal = { id, mode, card, year: now.getFullYear(), month: now.getMonth() };
+    const cal = { id, mode: card.dataset.mode, card, year: now.getFullYear(), month: now.getMonth() };
     calendars[id] = cal;
 
     card.innerHTML = `
@@ -424,34 +545,36 @@
     renderCalendar(cal);
   }
 
-  function itemsFor(cal, key) {
+  function chipsByDate(cal) {
+    const map = {};
     if (cal.mode === "hours") {
-      return (state.events[key] || []).slice().sort((a, b) => a.start.localeCompare(b.start))
-        .map(e => ({ cls: "", label: `${fmtTime(e.start)} ${e.title}` }));
+      data.events.slice().sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)))
+        .forEach(e => (map[e.event_date] = map[e.event_date] || []).push({ cls: "", label: `${fmtTime(e.start_time)} ${e.title}` }));
+    } else {
+      MEAL_SLOTS.forEach(s => data.meals.filter(m => m.meal_type === s.type).sort(byCreated)
+        .forEach(m => (map[m.meal_date] = map[m.meal_date] || []).push({ cls: s.key, label: `${s.key} · ${m.title}` })));
     }
-    const day = state.meals[key] || {};
-    const out = [];
-    MEAL_SLOTS.forEach(s => (day[s.key] || []).forEach(m => out.push({ cls: s.key, label: `${s.key} · ${m.title}` })));
-    return out;
+    return map;
   }
 
   function renderCalendar(cal) {
+    if (!cal) return;
     $("h2", cal.card).textContent = `${MONTHS[cal.month]} ${cal.year}`;
+    const map = chipsByDate(cal);
     const first = new Date(cal.year, cal.month, 1);
     const start = new Date(cal.year, cal.month, 1 - first.getDay());
     const todayKey = dateKey(new Date());
     let html = "";
     for (let i = 0; i < 42; i++) {
       const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
-      if (i === 35 && d.getMonth() !== cal.month) break; // drop an empty 6th row
+      if (i === 35 && d.getMonth() !== cal.month) break;
       const key = dateKey(d);
-      const items = itemsFor(cal, key);
-      const shown = items.slice(0, 3);
+      const items = map[key] || [];
       html += `
         <button class="day ${d.getMonth() !== cal.month ? "other" : ""} ${key === todayKey ? "today" : ""}" data-date="${key}"
           aria-label="${MONTHS[d.getMonth()]} ${d.getDate()}, ${items.length} item${items.length === 1 ? "" : "s"}">
           <span class="num">${d.getDate()}</span>
-          ${shown.map(it => `<span class="chip ${it.cls}">${esc(it.label)}</span>`).join("")}
+          ${items.slice(0, 3).map(it => `<span class="chip ${it.cls}">${esc(it.label)}</span>`).join("")}
           ${items.length > 3 ? `<span class="more">+${items.length - 3} more</span>` : ""}
         </button>`;
     }
@@ -465,9 +588,8 @@
   function openDay(cal, key) {
     current = { cal, key };
     const [y, m, d] = key.split("-").map(Number);
-    const date = new Date(y, m - 1, d);
-    $("#modalTitle").textContent = date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-    if (cal.mode === "hours") renderHours(); else renderMeals();
+    $("#modalTitle").textContent = new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+    if (cal.mode === "hours") renderHours(false); else renderMeals();
     overlay.classList.add("open");
     overlay.setAttribute("aria-hidden", "false");
   }
@@ -484,7 +606,8 @@
   /* ---- Household: hour-by-hour ---- */
   function renderHours(openForm, presetHour) {
     const { key } = current;
-    const events = (state.events[key] || []).slice().sort((a, b) => a.start.localeCompare(b.start));
+    const events = data.events.filter(e => e.event_date === key)
+      .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
     const preset = presetHour != null ? `${pad(presetHour)}:00` : "09:00";
     let html = `
       <form class="form ${openForm ? "open" : ""}" id="evForm">
@@ -497,18 +620,18 @@
         <p class="err" id="evErr"></p>
         <div style="display:flex;gap:8px;justify-content:flex-end">
           <button type="button" class="btn ghost" id="evCancel">Cancel</button>
-          <button type="submit" class="btn">Save event</button>
+          <button type="submit" class="btn" id="evSave">Save event</button>
         </div>
       </form>`;
     for (let h = 0; h < 24; h++) {
-      const inHour = events.filter(e => Number(e.start.slice(0, 2)) === h);
+      const inHour = events.filter(e => Number(String(e.start_time).slice(0, 2)) === h);
       html += `<div class="hour" id="h${h}"><div class="label">${hourLabel(h)}</div><div class="slot" data-hour="${h}">
         ${inHour.map(e => `
-          <div class="event" data-id="${e.id}">
+          <div class="event" data-id="${esc(e.id)}">
             <div class="ev-main">
               <div class="ev-title">${esc(e.title)}</div>
-              <div class="ev-time">${fmtTime(e.start)}${e.end ? " – " + fmtTime(e.end) : ""}</div>
-              ${e.desc ? `<div class="ev-desc">${esc(e.desc)}</div>` : ""}
+              <div class="ev-time">${fmtTime(e.start_time)}${e.end_time ? " – " + fmtTime(e.end_time) : ""}</div>
+              ${e.description ? `<div class="ev-desc">${esc(e.description)}</div>` : ""}
             </div>
             <button class="del" aria-label="Delete event">&times;</button>
           </div>`).join("")}
@@ -517,33 +640,39 @@
     body.innerHTML = html;
     actions.innerHTML = `<button class="btn" id="addEv">+ Add event</button>`;
 
-    $("#addEv").onclick = () => { renderHours(true); };
+    $("#addEv").onclick = () => renderHours(true);
     $("#evCancel").onclick = () => renderHours(false);
-    $("#evForm").onsubmit = e => {
+    $("#evForm").onsubmit = async e => {
       e.preventDefault();
       const title = $("#evTitle").value.trim(), start = $("#evStart").value, end = $("#evEnd").value;
       if (!title || !start) { $("#evErr").textContent = "Add a title and a start time."; return; }
       if (end && end <= start) { $("#evErr").textContent = "End time needs to be after the start time."; return; }
-      (state.events[key] = state.events[key] || []).push({ id: uid(), title, start, end, desc: $("#evDesc").value.trim() });
-      save();
+      $("#evSave").disabled = true;
+      const rows = await run(sb.from("household_events").insert({
+        event_date: key, title, start_time: start, end_time: end || null,
+        description: $("#evDesc").value.trim() || null
+      }).select(), "Event added");
+      if (!rows) { const b = $("#evSave"); if (b) b.disabled = false; return; }
+      rows.forEach(r => upsert(data.events, r));
+      renderCalendar(current.cal);
       renderHours(false);
       const target = $("#h" + Number(start.slice(0, 2)));
       if (target) target.scrollIntoView({ block: "center" });
-      toast("Event added");
     };
     body.querySelectorAll(".slot").forEach(slot => slot.addEventListener("dblclick", ev => {
       if (ev.target === slot) renderHours(true, Number(slot.dataset.hour));
     }));
-    body.querySelectorAll(".event .del").forEach(btn => btn.onclick = () => {
+    body.querySelectorAll(".event .del").forEach(btn => btn.onclick = async () => {
       const id = btn.closest(".event").dataset.id;
-      state.events[key] = (state.events[key] || []).filter(x => x.id !== id);
-      if (!state.events[key].length) delete state.events[key];
-      save(); renderHours(false);
+      data.events = data.events.filter(x => x.id !== id);
+      renderHours(false);
+      renderCalendar(current.cal);
+      await run(sb.from("household_events").delete().eq("id", id));
     });
 
     if (openForm) { body.scrollTop = 0; $("#evTitle").focus(); }
     else {
-      const firstHour = events.length ? Number(events[0].start.slice(0, 2)) : 7;
+      const firstHour = events.length ? Number(String(events[0].start_time).slice(0, 2)) : 7;
       const row = $("#h" + firstHour);
       if (row) body.scrollTop = row.offsetTop - body.offsetTop - 8;
     }
@@ -552,9 +681,9 @@
   /* ---- Meals: breakfast / lunch / dinner ---- */
   function renderMeals(openSlot) {
     const { key } = current;
-    const day = state.meals[key] || {};
+    const dayMeals = data.meals.filter(m => m.meal_date === key).sort(byCreated);
     body.innerHTML = MEAL_SLOTS.map(s => {
-      const meals = day[s.key] || [];
+      const meals = dayMeals.filter(m => m.meal_type === s.type);
       return `
         <div class="meal" data-slot="${s.key}">
           <div class="meal-head">
@@ -564,10 +693,10 @@
           ${meals.length ? "" : `<div class="meal-empty">Nothing planned.</div>`}
           <div style="display:flex;flex-direction:column;gap:6px">
             ${meals.map(m => `
-              <div class="event" data-id="${m.id}">
+              <div class="event" data-id="${esc(m.id)}">
                 <div class="ev-main">
                   <div class="ev-title">${esc(m.title)}</div>
-                  ${m.desc ? `<div class="ev-desc">${esc(m.desc)}</div>` : ""}
+                  ${m.notes ? `<div class="ev-desc">${esc(m.notes)}</div>` : ""}
                 </div>
                 <button class="del" aria-label="Delete meal">&times;</button>
               </div>`).join("")}
@@ -580,7 +709,7 @@
             <p class="err"></p>
             <div style="display:flex;gap:8px;justify-content:flex-end">
               <button type="button" class="btn ghost cancel">Cancel</button>
-              <button type="submit" class="btn">Save ${s.name.toLowerCase()}</button>
+              <button type="submit" class="btn save">Save ${s.name.toLowerCase()}</button>
             </div>
           </form>
         </div>`;
@@ -589,68 +718,129 @@
     $("#doneMeals").onclick = closeDay;
 
     body.querySelectorAll(".meal").forEach(section => {
-      const slot = section.dataset.slot;
+      const slot = MEAL_SLOTS.find(s => s.key === section.dataset.slot);
       const form = $("form", section);
-      $(".add-meal", section).onclick = () => { renderMeals(slot); };
+      $(".add-meal", section).onclick = () => renderMeals(slot.key);
       $(".cancel", section).onclick = () => renderMeals();
-      form.onsubmit = e => {
+      form.onsubmit = async e => {
         e.preventDefault();
         const title = form.title.value.trim();
         if (!title) { $(".err", form).textContent = "Give the meal a name."; return; }
         const ing = form.ing.value.trim();
-        const d = state.meals[key] = state.meals[key] || {};
-        (d[slot] = d[slot] || []).push({ id: uid(), title, desc: form.desc.value.trim(), ingredients: ing });
+        const toGrocery = form.toGrocery.checked;
+        $(".save", form).disabled = true;
+        const rows = await run(sb.from("meal_plans").insert({
+          meal_date: key, meal_type: slot.type, title,
+          notes: form.desc.value.trim() || null, ingredients: ing || null
+        }).select());
+        if (!rows) { $(".save", form).disabled = false; return; }
+        rows.forEach(r => upsert(data.meals, r));
         let added = 0;
-        if (ing && form.toGrocery.checked) {
-          added = addItems("grocery", ing);
-          const g = document.querySelector('[data-list="grocery"]');
-          if (g) renderList(g);
-        }
-        save();
-        renderMeals();
+        if (ing && toGrocery && rows[0]) added = await addItems("grocery", ing, { meal_plan_id: rows[0].id });
+        if (current) { renderCalendar(current.cal); renderMeals(); }
         toast(added ? `Saved · ${added} ingredient${added === 1 ? "" : "s"} added to Grocery` : "Meal saved");
       };
-      section.querySelectorAll(".event .del").forEach(btn => btn.onclick = () => {
+      section.querySelectorAll(".event .del").forEach(btn => btn.onclick = async () => {
         const id = btn.closest(".event").dataset.id;
-        state.meals[key][slot] = state.meals[key][slot].filter(m => m.id !== id);
-        if (!state.meals[key][slot].length) delete state.meals[key][slot];
-        if (!Object.keys(state.meals[key]).length) delete state.meals[key];
-        save(); renderMeals();
+        data.meals = data.meals.filter(m => m.id !== id);
+        renderMeals();
+        renderCalendar(current.cal);
+        await run(sb.from("meal_plans").delete().eq("id", id));
       });
     });
-    if (openSlot) { const f = body.querySelector(`.meal[data-slot="${openSlot}"] input[name=title]`); if (f) { f.focus(); f.scrollIntoView({ block: "nearest" }); } }
+    if (openSlot) {
+      const f = body.querySelector(`.meal[data-slot="${openSlot}"] input[name=title]`);
+      if (f) { f.focus(); f.scrollIntoView({ block: "nearest" }); }
+    }
   }
 
+  /* ================= Sign in / out ================= */
+  const login = $("#login"), loginForm = $("#loginForm");
+  let loginMode = "signin"; // or "reset" (setting a new password after a reset email)
+  let started = false;
+
+  function showLogin(mode) {
+    loginMode = mode || "signin";
+    const reset = loginMode === "reset";
+    $("#loginSub").textContent = reset ? "Choose a new password." : "Sign in to see your lists and calendars.";
+    $("#emailField").style.display = reset ? "none" : "";
+    $("#loginEmail").required = !reset;
+    $("#pwLabel").textContent = reset ? "New password" : "Password";
+    $("#loginPassword").autocomplete = reset ? "new-password" : "current-password";
+    $("#loginBtn").textContent = reset ? "Save password" : "Sign in";
+    $("#forgotBtn").style.display = reset ? "none" : "";
+    $("#loginErr").textContent = "";
+    $("#loginPassword").value = "";
+    login.classList.add("open");
+    $("#appHeader").classList.add("hidden");
+    $("#appMain").classList.add("hidden");
+  }
+
+  loginForm.addEventListener("submit", async e => {
+    e.preventDefault();
+    const btn = $("#loginBtn");
+    $("#loginErr").textContent = ""; $("#loginMsg").textContent = "";
+    btn.disabled = true;
+    let error;
+    if (loginMode === "reset") {
+      ({ error } = await sb.auth.updateUser({ password: $("#loginPassword").value }));
+      if (!error) { loginMode = "signin"; toast("Password updated"); startApp(); }
+    } else {
+      ({ error } = await sb.auth.signInWithPassword({
+        email: $("#loginEmail").value.trim(), password: $("#loginPassword").value
+      }));
+    }
+    btn.disabled = false;
+    if (error) $("#loginErr").textContent = error.message === "Invalid login credentials" ? "Email or password is incorrect." : error.message;
+  });
+
+  $("#forgotBtn").addEventListener("click", async () => {
+    const email = $("#loginEmail").value.trim();
+    $("#loginErr").textContent = ""; $("#loginMsg").textContent = "";
+    if (!email) { $("#loginErr").textContent = "Type your email above first."; return; }
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    if (error) $("#loginErr").textContent = error.message;
+    else $("#loginMsg").textContent = "Check your email for a reset link.";
+  });
+
+  $("#signOutBtn").addEventListener("click", () => sb.auth.signOut());
+
+  async function startApp() {
+    login.classList.remove("open");
+    $("#appHeader").classList.remove("hidden");
+    $("#appMain").classList.remove("hidden");
+    if (started) return;
+    started = true;
+    $("#loading").style.display = "";
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+    await loadAll();
+    $("#loading").style.display = "none";
+    setTab(prefGet("planner-tab", "household") === "meals" ? "meals" : "household");
+    renderAll();
+    subscribe();
+  }
+
+  function stopApp() {
+    started = false;
+    if (channel) { sb.removeChannel(channel); channel = null; }
+    Object.keys(data).forEach(k => data[k] = []);
+    renderAll();
+    if (overlay.classList.contains("open")) closeDay();
+    showLogin("signin");
+  }
+
+  // Build the UI once (empty), then fill it after sign-in
+  document.querySelectorAll("[data-list]").forEach(buildList);
   document.querySelectorAll("[data-calendar]").forEach(buildCalendar);
 
-  /* ================= Backup / restore ================= */
-  $("#exportBtn").onclick = () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `household-planner-${dateKey(new Date())}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  };
-  $("#importBtn").onclick = () => $("#importFile").click();
-  $("#importFile").onchange = e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const r = new FileReader();
-    r.onload = () => {
-      try {
-        const data = JSON.parse(r.result);
-        if (!data.lists) throw new Error("bad file");
-        state = Object.assign(blank(), data);
-        save();
-        location.reload();
-      } catch (err) { toast("That file isn't a planner backup"); }
-    };
-    r.readAsText(file);
-    e.target.value = "";
-  };
-
-  setTab(state.tab === "meals" ? "meals" : "household");
+  sb.auth.onAuthStateChange((event, session) => {
+    // Supabase recommends not awaiting other Supabase calls inside this callback
+    setTimeout(() => {
+      if (event === "PASSWORD_RECOVERY") showLogin("reset");
+      else if (event === "SIGNED_OUT" || !session) stopApp();
+      else if (loginMode !== "reset") startApp();
+    }, 0);
+  });
 })();
 </script>
 </body>
